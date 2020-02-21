@@ -4,6 +4,9 @@ go:
 before_install:
 - go get -t -v ./...
 - "./scripts/go_test.sh"
+- curl -o $HOME/bin/docker-helper https://raw.githubusercontent.com/chanzuckerberg/infra-tools/v0.1.0/docker-helper
+- chmod +x $HOME/bin/docker-helper
+- pip install awscli --upgrade --user
 jobs:
   include:
   - stage: make-build
@@ -26,6 +29,18 @@ jobs:
     - docker build -t cmattoon/aws-ssm:PR-$TRAVIS_PULL_REQUEST .
     - echo "$DOCKER_PASSWD" | docker login --username "$DOCKER_USER" --password-stdin
     - docker push cmattoon/aws-ssm:PR-$TRAVIS_PULL_REQUEST
+  - stage: ecr-build
+    script:
+    - aws configure set aws_access_key_id     $IDACCT_AWS_ACCESS_KEY_ID     --profile _idacct
+    - aws configure set aws_secret_access_key $IDACCT_AWS_SECRET_ACCESS_KEY --profile _idacct
+    - aws --profile _idacct sts get-caller-identity
+    - aws configure set profile.czi-si.role_arn arn:aws:iam::626314663667:role/ci/aws-ssm_push
+    - aws configure set profile.czi-si.source_profile _idacct
+    - aws configure set profile.czi-si.region us-west-2
+    - unset DOCKER_USER
+    - unset DOCKER_PASSWD
+    - AWS_PROFILE=czi-si docker-helper build 626314663667.dkr.ecr.us-west-2.amazonaws.com/aws-ssm . $TRAVIS_BRANCH ${TRAVIS_COMMIT::8} $TRAVIS_BUILD_NUMBER
+    - AWS_PROFILE=czi-si docker-helper push 626314663667.dkr.ecr.us-west-2.amazonaws.com/aws-ssm
 branches:
   only:
   - master
@@ -38,6 +53,7 @@ stages:
   if: branch != master AND type != pull_request
 - name: docker-pr
   if: type == pull_request
+- name: ecr-build
 after_success:
 - bash <(curl -s https://codecov.io/bash)
 deploy:
